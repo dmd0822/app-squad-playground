@@ -1,7 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.ChatCompletion;
+using Azure.AI.Projects;
+using Azure.AI.Projects.OpenAI;
+using OpenAI.Responses;
 using TravelAssistant.Abstractions;
 
 namespace TravelAssistant.Agents.PointsOfInterest;
@@ -9,20 +10,15 @@ namespace TravelAssistant.Agents.PointsOfInterest;
 /// <summary>
 /// Agent specialized in finding points of interest, attractions,
 /// restaurants, and activities at a travel destination.
-/// Uses Semantic Kernel to execute a prompt loaded from
-/// <c>Prompts/search.prompt.yaml</c>.
+/// Uses Azure AI Foundry's agent service to load and execute the POI search prompt.
 /// </summary>
 public class PoiAgent : TravelAgentBase
 {
-    /// <summary>
-    /// Stable identifier used to register and route to this agent.
-    /// </summary>
-    public const string Id = "poi";
+    /// <summary>Unique identifier for this agent.</summary>
+    public const string AgentName = "poi";
 
-    /// <summary>
-    /// Name of the prompt file (without extension) loaded at query time.
-    /// </summary>
-    private const string SearchPromptName = "search";
+    private const string PromptName = "search";
+    private const string DefaultModelDeployment = "gpt-4o";
 
     private static readonly string[] Keywords =
         ["attraction", "restaurant", "thing to do", "activity", "landmark", "museum",
@@ -34,25 +30,44 @@ public class PoiAgent : TravelAgentBase
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    private readonly Kernel? _kernel;
+    private readonly AIProjectClient? _projectClient;
+    private readonly string _modelDeploymentName;
+    private string? _registeredAgentName;
+    private readonly SemaphoreSlim _registrationLock = new(1, 1);
 
     /// <summary>
-    /// Initialises the POI agent.
+    /// Initialises the agent with only a prompt loader. Suitable for testing and
+    /// environments where Azure AI Foundry integration is not yet configured.
     /// </summary>
-    /// <param name="promptLoader">Service that loads prompt YAML files at runtime.</param>
-    /// <param name="kernel">
-    /// Semantic Kernel instance used to invoke the LLM.
-    /// When <see langword="null"/> the agent loads prompts but cannot call the LLM
-    /// (useful in unit tests that only exercise routing logic).
+    /// <param name="promptLoader">Service used to load YAML prompt templates.</param>
+    public PoiAgent(IPromptLoader promptLoader)
+        : this(promptLoader, null, DefaultModelDeployment)
+    {
+    }
+
+    /// <summary>
+    /// Initialises the agent with full Azure AI Foundry integration.
+    /// </summary>
+    /// <param name="promptLoader">Service used to load YAML prompt templates.</param>
+    /// <param name="projectClient">
+    /// Authenticated Azure AI Foundry project client. When provided, the agent
+    /// registers itself and executes queries through the Foundry Responses API.
     /// </param>
-    public PoiAgent(IPromptLoader promptLoader, Kernel? kernel = null)
+    /// <param name="modelDeploymentName">
+    /// Name of the model deployment in the Foundry project (e.g., "gpt-4o").
+    /// </param>
+    public PoiAgent(
+        IPromptLoader promptLoader,
+        AIProjectClient? projectClient,
+        string modelDeploymentName = DefaultModelDeployment)
         : base(promptLoader)
     {
-        _kernel = kernel;
+        _projectClient = projectClient;
+        _modelDeploymentName = modelDeploymentName;
     }
 
     /// <inheritdoc/>
-    public override string AgentId => Id;
+    public override string AgentId => AgentName;
 
     /// <inheritdoc/>
     public override string DisplayName => "Points of Interest";
@@ -69,83 +84,112 @@ public class PoiAgent : TravelAgentBase
     }
 
     /// <summary>
-    /// Processes a travel query and returns a list of recommended points of interest.
+    /// Processes a POI search query. Loads the system prompt from YAML,
+    /// substitutes context variables, and invokes the Azure AI Foundry agent.
     /// </summary>
-    /// <param name="query">The user's natural-language query.</param>
-    /// <param name="context">
-    /// Shared travel context containing destination, dates, and preferences.
-    /// </param>
+    /// <param name="query">Natural-language POI search request.</param>
+    /// <param name="context">Shared travel context (destination, dates, interests).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
-    /// An <see cref="AgentResponse"/> whose <see cref="AgentResponse.Data"/> is a
-    /// <see cref="PoiSearchResult"/> when the LLM call succeeds.
+    /// An <see cref="AgentResponse"/> whose <c>Data</c> property is a
+    /// <see cref="PoiSearchResult"/> containing the structured POI list.
     /// </returns>
-    /// <exception cref="InvalidOperationException">
-    /// Thrown when no Semantic Kernel instance was provided at construction time.
-    /// </exception>
     public override async Task<AgentResponse> ProcessAsync(
         string query,
         TravelContext context,
         CancellationToken cancellationToken = default)
     {
-        if (_kernel is null)
-        {
-            throw new InvalidOperationException(
-                $"{nameof(PoiAgent)} requires a Semantic Kernel {nameof(Kernel)} instance " +
-                "to process queries. Ensure a Kernel is registered in the service provider.");
-        }
-
-        // Load the prompt template from the YAML file — no strings hardcoded here.
-        var promptTemplate = await PromptLoader.LoadAsync(AgentId, SearchPromptName, cancellationToken);
-
-        // Build a chat history using the loaded system prompt.
-        var chatHistory = new ChatHistory(promptTemplate.SystemPrompt);
-
-        // Render the user message template with values from context + query.
-        var userMessage = RenderUserMessage(promptTemplate.UserMessageTemplate, query, context);
-        chatHistory.AddUserMessage(userMessage);
-
         try
         {
-            var chatService = _kernel.GetRequiredService<IChatCompletionService>();
+            var template = await PromptLoader.LoadAsync(AgentId, PromptName, cancellationToken);
+            var userMessage = BuildUserMessage(query, context, template);
 
-            var executionSettings = new PromptExecutionSettings
+            if (_projectClient is not null)
             {
-                ModelId = promptTemplate.Settings.Model
+                await EnsureAgentRegisteredAsync(template, cancellationToken);
+
+                var responseClient = _projectClient.OpenAI
+                    .GetProjectResponsesClientForAgent(_registeredAgentName!);
+
+#pragma warning disable OPENAI001
+                ResponseResult result = await responseClient.CreateResponseAsync(
+                    new CreateResponseOptions([ResponseItem.CreateUserMessageItem(userMessage)]),
+                    cancellationToken);
+#pragma warning restore OPENAI001
+
+                var message = result.GetOutputText();
+                var data = ParsePoiResult(message, context.Destination ?? query);
+
+                return CreateResponse(
+                    BuildSummaryMessage(data),
+                    data: data,
+                    confidence: 0.9);
+            }
+
+            // Graceful fallback when no Azure AI Foundry client is configured.
+            var fallbackData = new PoiSearchResult
+            {
+                Destination = context.Destination ?? query,
+                Summary = "Prompt loaded. Configure Azure AI Foundry for live results.",
+                PointsOfInterest = []
             };
 
-            var result = await chatService.GetChatMessageContentAsync(
-                chatHistory,
-                executionSettings,
-                _kernel,
-                cancellationToken);
-
-            var responseText = result.Content ?? string.Empty;
-            var poiResult = ParsePoiResult(responseText, context.Destination ?? query);
-
             return CreateResponse(
-                BuildSummaryMessage(poiResult),
-                data: poiResult,
-                confidence: 0.9);
+                "POI search prompt loaded. Configure an Azure AI Foundry project client for live recommendations.",
+                data: fallbackData,
+                confidence: 0.5);
         }
-        catch (Exception ex) when (ex is not OperationCanceledException)
+        catch (Exception ex)
         {
             return CreateErrorResponse($"POI search failed: {ex.Message}");
         }
     }
 
-    // ---------------------------------------------------------------------------
-    // Private helpers
-    // ---------------------------------------------------------------------------
+    /// <summary>
+    /// Lazily registers (or re-uses) the POI agent in Azure AI Foundry.
+    /// Thread-safe — only one registration request is sent even under concurrent load.
+    /// </summary>
+    private async Task EnsureAgentRegisteredAsync(
+        PromptTemplate template,
+        CancellationToken cancellationToken)
+    {
+        if (_registeredAgentName is not null) return;
+
+        await _registrationLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_registeredAgentName is not null) return;
+
+            var definition = new PromptAgentDefinition(_modelDeploymentName)
+            {
+                Instructions = template.SystemPrompt
+            };
+
+            var agentVersion = await _projectClient!.Agents
+                .CreateAgentVersionAsync(
+                    agentName: AgentName,
+                    options: new AgentVersionCreationOptions(definition),
+                    cancellationToken: cancellationToken);
+
+            _registeredAgentName = agentVersion.Value.Name;
+        }
+        finally
+        {
+            _registrationLock.Release();
+        }
+    }
 
     /// <summary>
-    /// Fills <c>{{placeholder}}</c> tokens in the user message template with
-    /// runtime values from <paramref name="context"/> and the raw <paramref name="query"/>.
+    /// Substitutes <see cref="PromptTemplate.UserMessageTemplate"/> placeholders
+    /// with values derived from <paramref name="context"/> and <paramref name="query"/>.
+    /// Falls back to the raw query when no template is available.
     /// </summary>
-    private static string RenderUserMessage(string? template, string query, TravelContext context)
+    private static string BuildUserMessage(
+        string query,
+        TravelContext context,
+        PromptTemplate template)
     {
-        if (string.IsNullOrWhiteSpace(template))
-            return query;
+        if (template.UserMessageTemplate is null) return query;
 
         var destination = context.Destination ?? "the destination";
         var travelDates = FormatTravelDates(context);
@@ -153,7 +197,7 @@ public class PoiAgent : TravelAgentBase
             ? raw?.ToString() ?? "general sightseeing"
             : "general sightseeing";
 
-        return template
+        return template.UserMessageTemplate
             .Replace("{{destination}}", destination)
             .Replace("{{travel_dates}}", travelDates)
             .Replace("{{interests}}", interests)

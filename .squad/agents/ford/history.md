@@ -203,3 +203,118 @@ Framework. Arthur should be informed so the Abstractions layer can be reviewed f
 
 **Build status:** `npm run build` clean (0 TS errors, 0 warnings), 131 modules transformed.
 
+### 2026-03-06: FlightAgent Migrated to Azure AI Foundry Agent Framework
+
+**What:** Migrated FlightAgent from Semantic Kernel to Azure AI Foundry Agent Framework to match HotelAgent pattern. Part of team-wide standardization on Azure.AI.Projects SDK.
+
+**Files modified:**
+- `src/TravelAssistant.Agents.FlightSearch/FlightAgent.cs` — Complete rewrite following canonical Azure AI Foundry pattern
+- `src/TravelAssistant.Agents.FlightSearch/TravelAssistant.Agents.FlightSearch.csproj` — Replaced `Microsoft.SemanticKernel 1.73.0` with `Azure.AI.Projects 2.0.0-beta.1`
+- `src/TravelAssistant.Host/TravelAssistant.Host.csproj` — Updated `Azure.Identity` to `1.17.1` (required by Azure.AI.Projects)
+- `src/TravelAssistant.Api/TravelAssistant.Api.csproj` — Updated `Azure.Identity` to `1.17.1`
+
+**Key implementation decisions:**
+
+1. **Followed HotelAgent reference pattern exactly** — Used HotelAgent.cs as canonical implementation guide. FlightAgent now has identical constructor signature, registration pattern, and ProcessAsync structure to HotelAgent.
+
+2. **Two-constructor pattern preserved** — 
+   - `FlightAgent(IPromptLoader)` — test-only, chains to production constructor with `null` client
+   - `FlightAgent(IPromptLoader, AIProjectClient?, string)` — production, full Azure AI Foundry integration
+   - Maintains backward compatibility with existing unit tests that only test `CanHandle()`
+
+3. **Replaced SK invocation with Azure AI Foundry pattern:**
+   - REMOVED: `Kernel?`, `IChatCompletionService`, `ChatHistory`, `GetChatMessageContentAsync()`
+   - ADDED: `AIProjectClient?`, `EnsureAgentRegisteredAsync()` with `SemaphoreSlim(1,1)`, `PromptAgentDefinition`, `CreateAgentVersionAsync()`, `GetProjectResponsesClientForAgent()`, `CreateResponseAsync()`, `GetOutputText()`
+   - Added `#pragma warning disable/restore OPENAI001` around experimental API call
+
+4. **Kept all flight-specific logic intact:**
+   - `FlightSearchResult` + `FlightOption` models (separate file unchanged)
+   - `ParseFlightSearchResult()` — JSON parsing with ```json fence extraction
+   - `BuildUserMessage()` — template variable substitution ({{origin}}, {{destination}}, {{departure_date}}, {{return_date}}, {{passengers}}, {{cabin_class}}, {{query}})
+   - `GetMetaString()` helper for reading `Metadata["Origin"]` and `Metadata["CabinClass"]`
+   - `Keywords` array and `CanHandle()` — unchanged
+
+5. **Graceful fallback when client is null** — Returns a valid `AgentResponse` with confidence 0.5 and message "Flight search prompt loaded. Configure Azure AI Foundry for live results." Does NOT throw exception. Follows HotelAgent pattern exactly.
+
+6. **Constants renamed for consistency:**
+   - `AgentIdValue` → `AgentName` (matches HotelAgent)
+   - `SearchPromptName` → `PromptName` (matches HotelAgent)
+   - Added `DefaultModelDeployment = "gpt-4o"` constant
+
+7. **Azure.Identity version conflict resolved** — Azure.AI.Projects 2.0.0-beta.1 requires Azure.Identity >= 1.17.1. Updated both Host and Api projects from 1.13.2 to 1.17.1 to resolve NuGet downgrade errors.
+
+**Build / test status:** Solution builds clean (0 errors, 0 warnings), all 9 pre-existing tests pass.
+
+**Migration complete:** FlightAgent now uses identical Azure AI Foundry pattern as HotelAgent. Only PoiAgent remains on Semantic Kernel.
+
+### 2026-03-06: DI Wiring Migrated to Azure AI Foundry
+
+**What:** Updated DI wiring in both `TravelAssistant.Host/Program.cs` and `TravelAssistant.Api/Program.cs` to use Azure AI Foundry Agent Framework (`Azure.AI.Projects`) instead of Semantic Kernel.
+
+**Files modified:**
+- `src/TravelAssistant.Host/Program.cs` — Removed SK registration, added `AIProjectClient` registration with graceful fallback
+- `src/TravelAssistant.Api/Program.cs` — Same DI changes as Host
+- `src/TravelAssistant.Host/TravelAssistant.Host.csproj` — Removed SK packages, added `Azure.AI.Projects 2.0.0-beta.1` + `Azure.Identity 1.17.1`
+- `src/TravelAssistant.Api/TravelAssistant.Api.csproj` — Same package changes as Host
+
+**Key implementation decisions:**
+
+1. **Unified agent registration pattern** — All three agents (POI, Flight, Hotel) now use identical factory lambda pattern: `sp => new XAgent(promptLoader, projectClient, modelDeployment)`. This matches the new constructor signature `(IPromptLoader, AIProjectClient?, string)` that all agents implement after migration.
+
+2. **Configuration key change** — Switched from `AzureOpenAI:Endpoint`, `AzureOpenAI:ApiKey`, `AzureOpenAI:DeploymentName` to `AZURE_AI_FOUNDRY_PROJECT_ENDPOINT` and `AZURE_AI_FOUNDRY_MODEL_DEPLOYMENT`. The new pattern uses `DefaultAzureCredential` (managed identity support), not API keys.
+
+3. **Graceful null handling** — When `AZURE_AI_FOUNDRY_PROJECT_ENDPOINT` is missing, `projectClient` is null and agents return fallback responses. No exceptions at startup; warning printed to console.
+
+4. **Azure.Identity version** — Used `1.17.1` (not `1.13.2`) because `Azure.AI.Projects 2.0.0-beta.1` transitively requires `>= 1.17.1`. Package downgrade error prompted the correction.
+
+5. **Removed all Semantic Kernel references** — Both `Microsoft.SemanticKernel 1.73.0` and `Microsoft.SemanticKernel.Connectors.AzureOpenAI 1.73.0` packages removed from both projects. No SK usings remain in Program.cs files.
+
+**Build status:** Solution builds clean (0 errors, 0 warnings). All 7 projects compile successfully.
+
+### 2026-03-06: POI Agent Migrated to Azure Agent Framework
+
+**What:** Migrated `PoiAgent` from Semantic Kernel to Azure AI Foundry Agent Framework following the canonical pattern from `HotelAgent`.
+
+**Files modified:**
+- `src/TravelAssistant.Agents.PointsOfInterest/PoiAgent.cs` — Complete rewrite to Azure Agent Framework pattern
+- `src/TravelAssistant.Agents.PointsOfInterest/TravelAssistant.Agents.PointsOfInterest.csproj` — Replaced `Microsoft.SemanticKernel 1.73.0` with `Azure.AI.Projects 2.0.0-beta.1`
+
+**Key implementation patterns:**
+
+1. **Two-constructor pattern** — `PoiAgent(IPromptLoader)` for test-only use (chains to production constructor with null client), and `PoiAgent(IPromptLoader, AIProjectClient?, string modelDeploymentName = "gpt-4o")` for production with full Azure AI Foundry integration.
+
+2. **Constants renamed for consistency** — Changed `Id = "poi"` to `AgentName = "poi"` and `SearchPromptName = "search"` to `PromptName = "search"` to match the standard pattern. Added `DefaultModelDeployment = "gpt-4o"` constant.
+
+3. **Removed all Semantic Kernel code** — Deleted `Kernel?` field, `IChatCompletionService`, `ChatHistory`, `GetChatMessageContentAsync()` invocation pattern, and `PromptExecutionSettings`. No more `using Microsoft.SemanticKernel` references.
+
+4. **Added Azure AI Foundry agent registration** — Implemented `EnsureAgentRegisteredAsync()` with `SemaphoreSlim(1,1)` for thread-safe lazy registration. Uses `PromptAgentDefinition` with system prompt as `Instructions`, then calls `CreateAgentVersionAsync()`.
+
+5. **Switched to Responses API invocation** — Uses `GetProjectResponsesClientForAgent()` → `CreateResponseAsync()` → `GetOutputText()` pattern with `#pragma warning disable/restore OPENAI001` around the experimental API call.
+
+6. **Graceful null client fallback** — When `_projectClient is null`, returns valid `AgentResponse` with fallback message and confidence 0.5 instead of throwing `InvalidOperationException`. Allows tests to pass without Azure AI Foundry configuration.
+
+7. **Preserved all existing logic** — Kept `ParsePoiResult()` method with JSON extraction and deserialization, `BuildUserMessage()` (renamed from `RenderUserMessage()`), `FormatTravelDates()`, `BuildSummaryMessage()`, `Keywords` array, `CanHandle()`, and internal `PoiResultJson` + `PoiItemJson` DTOs intact.
+
+8. **PoiSearchResult.cs unchanged** — Separate file with `PoiItem` and `PoiSearchResult` records remains untouched; no model changes required.
+
+**Build / test status:** Solution builds clean (0 errors, 0 warnings), all 9 tests passing. POI agent now follows identical Azure Agent Framework pattern as Hotel and Flight agents.
+
+### 2026-03-06: Azure Agent Framework Migration — Complete
+
+**Overall outcome:** Full standardization on Azure AI Foundry Agent Framework achieved. All three agents (POI, Flight, Hotel) now use unified SDK and DI pattern.
+
+**Migration sweep:**
+1. **PoiAgent** — Migrated from SK to Azure AI Foundry; graceful null fallback; all tests pass
+2. **FlightAgent** — Migrated from SK to Azure AI Foundry; retained all flight logic and metadata patterns; all tests pass
+3. **HotelAgent** — Already reference implementation; unchanged
+4. **DI wiring** — Unified across both Host and Api projects; `AIProjectClient` registration; no more mixed pattern
+
+**Build verification:** ✅ Clean (0 errors, 0 warnings), all 9 tests passing, all 7 projects compile
+
+**Orchestration logs:**
+- `.squad/orchestration-log/2026-03-06T20-34-59Z-ford-poi.md`
+- `.squad/orchestration-log/2026-03-06T20-34-59Z-ford-flight.md`
+- `.squad/orchestration-log/2026-03-06T20-34-59Z-ford-di.md`
+
+**Session log:** `.squad/log/2026-03-06T20-34-59Z-azure-agent-framework-migration.md`
+

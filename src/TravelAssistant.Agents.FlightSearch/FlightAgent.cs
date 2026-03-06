@@ -1,5 +1,6 @@
-using Microsoft.SemanticKernel;
-using Microsoft.SemanticKernel.ChatCompletion;
+using Azure.AI.Projects;
+using Azure.AI.Projects.OpenAI;
+using OpenAI.Responses;
 using System.Text.Json;
 using TravelAssistant.Abstractions;
 
@@ -8,17 +9,15 @@ namespace TravelAssistant.Agents.FlightSearch;
 /// <summary>
 /// Agent specialized in searching for flights, comparing prices,
 /// and providing flight-related travel information.
-/// Prompts are loaded from <c>Prompts/search.prompt.yaml</c> via <see cref="IPromptLoader"/>.
+/// Uses Azure AI Foundry's agent service to load and execute the flight search prompt.
 /// </summary>
 public class FlightAgent : TravelAgentBase
 {
-    /// <summary>
-    /// Unique identifier for the Flight Search agent.
-    /// Use this constant when registering or referencing the agent — no magic strings.
-    /// </summary>
-    public const string AgentIdValue = "flight";
+    /// <summary>Unique identifier for this agent.</summary>
+    public const string AgentName = "flight";
 
-    private const string SearchPromptName = "search";
+    private const string PromptName = "search";
+    private const string DefaultModelDeployment = "gpt-4o";
 
     private static readonly string[] Keywords =
         ["flight", "fly", "airline", "airport", "plane", "departure", "arrival",
@@ -26,30 +25,44 @@ public class FlightAgent : TravelAgentBase
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    private readonly Kernel? _kernel;
+    private readonly AIProjectClient? _projectClient;
+    private readonly string _modelDeploymentName;
+    private string? _registeredAgentName;
+    private readonly SemaphoreSlim _registrationLock = new(1, 1);
 
     /// <summary>
-    /// Initializes the Flight Search agent without a Semantic Kernel instance.
-    /// <see cref="ProcessAsync"/> will return an error response if called without a kernel.
-    /// Use this constructor only in unit-testing <see cref="CanHandle"/>.
+    /// Initializes the agent with only a prompt loader. Suitable for testing and
+    /// environments where Azure AI Foundry integration is not yet configured.
     /// </summary>
-    /// <param name="promptLoader">Service used to load prompt templates from YAML files.</param>
-    public FlightAgent(IPromptLoader promptLoader) : base(promptLoader)
+    /// <param name="promptLoader">Service used to load YAML prompt templates.</param>
+    public FlightAgent(IPromptLoader promptLoader)
+        : this(promptLoader, null, DefaultModelDeployment)
     {
     }
 
     /// <summary>
-    /// Initializes the Flight Search agent with a Semantic Kernel instance for LLM execution.
+    /// Initializes the agent with full Azure AI Foundry integration.
     /// </summary>
-    /// <param name="promptLoader">Service used to load prompt templates from YAML files.</param>
-    /// <param name="kernel">The configured Semantic Kernel with a chat-completion backend.</param>
-    public FlightAgent(IPromptLoader promptLoader, Kernel kernel) : base(promptLoader)
+    /// <param name="promptLoader">Service used to load YAML prompt templates.</param>
+    /// <param name="projectClient">
+    /// Authenticated Azure AI Foundry project client. When provided, the agent
+    /// registers itself and executes queries through the Foundry Responses API.
+    /// </param>
+    /// <param name="modelDeploymentName">
+    /// Name of the model deployment in the Foundry project (e.g., "gpt-4o").
+    /// </param>
+    public FlightAgent(
+        IPromptLoader promptLoader,
+        AIProjectClient? projectClient,
+        string modelDeploymentName = DefaultModelDeployment)
+        : base(promptLoader)
     {
-        _kernel = kernel;
+        _projectClient = projectClient;
+        _modelDeploymentName = modelDeploymentName;
     }
 
     /// <inheritdoc/>
-    public override string AgentId => AgentIdValue;
+    public override string AgentId => AgentName;
 
     /// <inheritdoc/>
     public override string DisplayName => "Flight Search";
@@ -62,10 +75,8 @@ public class FlightAgent : TravelAgentBase
     }
 
     /// <summary>
-    /// Searches for flights matching the query and context.
-    /// Loads the prompt from <c>Prompts/search.prompt.yaml</c>, substitutes template
-    /// variables from <paramref name="context"/>, invokes the LLM, and returns a
-    /// <see cref="AgentResponse"/> whose <c>Data</c> is a <see cref="FlightSearchResult"/>.
+    /// Processes a flight search query. Loads the system prompt from YAML,
+    /// substitutes context variables, and invokes the Azure AI Foundry agent.
     /// </summary>
     /// <param name="query">The natural-language flight search request from the user.</param>
     /// <param name="context">
@@ -81,69 +92,103 @@ public class FlightAgent : TravelAgentBase
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
-    /// An <see cref="AgentResponse"/> with a natural-language <c>Message</c>
-    /// and <c>Data</c> typed as <see cref="FlightSearchResult"/>.
+    /// An <see cref="AgentResponse"/> whose <c>Data</c> property is a
+    /// <see cref="FlightSearchResult"/> containing the raw AI response and
+    /// structured search metadata.
     /// </returns>
     public override async Task<AgentResponse> ProcessAsync(
         string query,
         TravelContext context,
         CancellationToken cancellationToken = default)
     {
-        if (_kernel is null)
-        {
-            return CreateErrorResponse(
-                "FlightAgent requires a Semantic Kernel instance. " +
-                "Register it via the two-parameter constructor or DI.");
-        }
-
         try
         {
-            var promptTemplate = await PromptLoader.LoadAsync(AgentId, SearchPromptName, cancellationToken);
+            var template = await PromptLoader.LoadAsync(AgentId, PromptName, cancellationToken);
 
-            var origin      = GetMetaString(context, "Origin",      "Not specified");
-            var cabinClass  = GetMetaString(context, "CabinClass",  "Economy");
+            var origin = GetMetaString(context, "Origin", "Not specified");
+            var cabinClass = GetMetaString(context, "CabinClass", "Economy");
 
             var userMessage = BuildUserMessage(
-                promptTemplate.UserMessageTemplate ?? query,
-                origin:        origin,
-                destination:   context.Destination   ?? "Not specified",
+                template.UserMessageTemplate ?? query,
+                origin: origin,
+                destination: context.Destination ?? "Not specified",
                 departureDate: context.DepartureDate?.ToString("yyyy-MM-dd") ?? "Not specified",
-                returnDate:    context.ReturnDate?.ToString("yyyy-MM-dd")    ?? "Not specified",
-                passengers:    context.TravelerCount.ToString(),
-                cabinClass:    cabinClass,
-                query:         query);
+                returnDate: context.ReturnDate?.ToString("yyyy-MM-dd") ?? "Not specified",
+                passengers: context.TravelerCount.ToString(),
+                cabinClass: cabinClass,
+                query: query);
 
-            var chatHistory = new ChatHistory(promptTemplate.SystemPrompt);
-            chatHistory.AddUserMessage(userMessage);
-
-            var executionSettings = new PromptExecutionSettings
+            if (_projectClient is not null)
             {
-                ModelId = promptTemplate.Settings.Model,
-                ExtensionData = new Dictionary<string, object>
-                {
-                    ["temperature"] = promptTemplate.Settings.Temperature,
-                    ["max_tokens"]  = promptTemplate.Settings.MaxTokens
-                }
+                await EnsureAgentRegisteredAsync(template, cancellationToken);
+
+                var responseClient = _projectClient.OpenAI
+                    .GetProjectResponsesClientForAgent(_registeredAgentName!);
+
+#pragma warning disable OPENAI001
+                ResponseResult result = await responseClient.CreateResponseAsync(
+                    new CreateResponseOptions([ResponseItem.CreateUserMessageItem(userMessage)]),
+                    cancellationToken);
+#pragma warning restore OPENAI001
+
+                var message = result.GetOutputText();
+                var searchResult = ParseFlightSearchResult(message);
+
+                return CreateResponse(
+                    searchResult.Summary.Length > 0 ? searchResult.Summary : message,
+                    data: searchResult,
+                    confidence: 0.9);
+            }
+
+            // Graceful fallback when no Azure AI Foundry client is configured.
+            var fallbackData = new FlightSearchResult
+            {
+                Summary = "Flight search prompt loaded. Configure Azure AI Foundry for live results.",
+                Options = []
             };
 
-            var chatService = _kernel.GetRequiredService<IChatCompletionService>();
-            var result = await chatService.GetChatMessageContentAsync(
-                chatHistory,
-                executionSettings,
-                _kernel,
-                cancellationToken);
-
-            var responseText = result.Content ?? string.Empty;
-            var searchResult = ParseFlightSearchResult(responseText);
-
             return CreateResponse(
-                message:    searchResult.Summary.Length > 0 ? searchResult.Summary : responseText,
-                data:       searchResult,
-                confidence: 0.9);
+                "Flight search prompt loaded. Configure Azure AI Foundry for live results.",
+                data: fallbackData,
+                confidence: 0.5);
         }
         catch (Exception ex)
         {
-            return CreateErrorResponse(ex.Message);
+            return CreateErrorResponse($"Flight search failed: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Lazily registers (or re-uses) the flight agent in Azure AI Foundry.
+    /// Thread-safe — only one registration request is sent even under concurrent load.
+    /// </summary>
+    private async Task EnsureAgentRegisteredAsync(
+        PromptTemplate template,
+        CancellationToken cancellationToken)
+    {
+        if (_registeredAgentName is not null) return;
+
+        await _registrationLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_registeredAgentName is not null) return;
+
+            var definition = new PromptAgentDefinition(_modelDeploymentName)
+            {
+                Instructions = template.SystemPrompt
+            };
+
+            var agentVersion = await _projectClient!.Agents
+                .CreateAgentVersionAsync(
+                    agentName: AgentName,
+                    options: new AgentVersionCreationOptions(definition),
+                    cancellationToken: cancellationToken);
+
+            _registeredAgentName = agentVersion.Value.Name;
+        }
+        finally
+        {
+            _registrationLock.Release();
         }
     }
 

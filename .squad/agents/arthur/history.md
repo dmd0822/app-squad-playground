@@ -109,3 +109,49 @@ src/
 - **Agent IDs:** String literals in controller routing — consider exposing shared constants in Abstractions
 
 **Current Status:** Solution builds, all three agents functional, Web UI fully integrated. Ready for end-to-end testing and team decision review on framework standardization.
+
+### 2026-03-06: Azure Agent Framework Migration Specified
+
+**Decision:** Dave Davis directed full migration from Semantic Kernel to Azure AI Foundry Agent Framework.
+
+**Key architectural points established:**
+1. **Single SDK:** `Azure.AI.Projects 2.0.0-beta.1` for all agents
+2. **Reference implementation:** HotelAgent already implements the correct pattern — POI and Flight agents must match
+3. **Constructor signature:** All agents take `(IPromptLoader, AIProjectClient?, string modelDeployment)`
+4. **Thread-safe registration:** Lazy `SemaphoreSlim`-guarded `EnsureAgentRegisteredAsync()` pattern
+5. **Graceful fallback:** When `AIProjectClient` is null, agents return stub responses (confidence 0.5) instead of throwing
+6. **No API keys:** `DefaultAzureCredential` replaces AzureOpenAI API key configuration
+
+**Files produced:**
+- `.squad/agents/ford/migration-spec-azure-agent-framework.md` — full implementation brief for Ford
+- `.squad/decisions/inbox/arthur-azure-agent-framework-migration.md` — decision record
+
+**Abstractions unchanged:** `ITravelAgent`, `TravelAgentBase`, `TravelOrchestrator` remain framework-agnostic — no modifications needed.
+
+**Environment variable migration:**
+- Old: `AzureOpenAI:Endpoint`, `AzureOpenAI:ApiKey`, `AzureOpenAI:DeploymentName`
+- New: `AZURE_AI_FOUNDRY_PROJECT_ENDPOINT`, `AZURE_AI_FOUNDRY_MODEL_DEPLOYMENT`
+
+**Assignees:** Ford (implementation), Marvin (test updates)
+
+### 2026-03-06: Azure Agent Framework Migration — Complete
+
+**Outcome:** Full migration completed successfully. All agents now use Azure AI Foundry Agent Framework exclusively.
+
+**Execution Summary:**
+- **PoiAgent:** Fully migrated to Azure AI Foundry pattern, all tests passing
+- **FlightAgent:** Fully migrated to Azure AI Foundry pattern, all tests passing
+- **HotelAgent:** Already reference implementation, no changes needed
+- **Host/Api DI:** Updated to unified `AIProjectClient` registration, removed all Semantic Kernel wiring
+
+**Build Status:** ✅ Clean build, 0 errors, 0 warnings, all 9 tests passing
+
+**Architecture Achievement:** Framework divergence fully resolved. Project now standardized on single SDK across all three agents. No more mixed pattern confusion. Environment variables simplified to `AZURE_AI_FOUNDRY_PROJECT_ENDPOINT` and `AZURE_AI_FOUNDRY_MODEL_DEPLOYMENT`.
+
+**Orchestration logs:**
+- `.squad/orchestration-log/2026-03-06T20-34-59Z-arthur.md` — Arthur's specification work
+- `.squad/orchestration-log/2026-03-06T20-34-59Z-ford-poi.md` — PoiAgent migration
+- `.squad/orchestration-log/2026-03-06T20-34-59Z-ford-flight.md` — FlightAgent migration
+- `.squad/orchestration-log/2026-03-06T20-34-59Z-ford-di.md` — DI wiring updates
+
+**Session log:** `.squad/log/2026-03-06T20-34-59Z-azure-agent-framework-migration.md`

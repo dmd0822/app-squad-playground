@@ -1,6 +1,7 @@
+using Azure.AI.Projects;
+using Azure.Identity;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Microsoft.SemanticKernel;
 using TravelAssistant.Abstractions;
 using TravelAssistant.Agents.PointsOfInterest;
 using TravelAssistant.Agents.FlightSearch;
@@ -13,38 +14,36 @@ var builder = Host.CreateApplicationBuilder(args);
 // Register prompt loader
 builder.Services.AddSingleton<IPromptLoader, YamlPromptLoader>();
 
-// Build and register Semantic Kernel.
+// Configure Azure AI Foundry Agent Framework.
 // Configure via appsettings.json or environment variables:
-//   AzureOpenAI__Endpoint       — Azure OpenAI resource endpoint
-//   AzureOpenAI__ApiKey         — API key (or use managed identity)
-//   AzureOpenAI__DeploymentName — Chat model deployment (default: gpt-4o)
-var kernelBuilder = Kernel.CreateBuilder();
+//   AZURE_AI_FOUNDRY_PROJECT_ENDPOINT — Azure AI Foundry project endpoint
+//   AZURE_AI_FOUNDRY_MODEL_DEPLOYMENT — Model deployment name (default: gpt-4o)
+var projectEndpoint = builder.Configuration["AZURE_AI_FOUNDRY_PROJECT_ENDPOINT"];
+var modelDeployment = builder.Configuration["AZURE_AI_FOUNDRY_MODEL_DEPLOYMENT"] ?? "gpt-4o";
 
-var endpoint = builder.Configuration["AzureOpenAI:Endpoint"];
-var apiKey = builder.Configuration["AzureOpenAI:ApiKey"];
-var deployment = builder.Configuration["AzureOpenAI:DeploymentName"] ?? "gpt-4o";
-
-if (!string.IsNullOrWhiteSpace(endpoint) && !string.IsNullOrWhiteSpace(apiKey))
+AIProjectClient? projectClient = null;
+if (!string.IsNullOrWhiteSpace(projectEndpoint))
 {
-#pragma warning disable SKEXP0010 // AzureOpenAI connector is experimental in 1.x
-    kernelBuilder.AddAzureOpenAIChatCompletion(deployment, endpoint, apiKey);
-#pragma warning restore SKEXP0010
+    projectClient = new AIProjectClient(
+        new Uri(projectEndpoint),
+        new DefaultAzureCredential());
+    builder.Services.AddSingleton(projectClient);
 }
 else
 {
-    Console.WriteLine("⚠️  Azure OpenAI not configured — agents will throw when ProcessAsync is called.");
-    Console.WriteLine("    Set AzureOpenAI:Endpoint and AzureOpenAI:ApiKey in configuration.");
+    Console.WriteLine("⚠️  Azure AI Foundry not configured — agents will return fallback responses.");
+    Console.WriteLine("    Set AZURE_AI_FOUNDRY_PROJECT_ENDPOINT in configuration.");
 }
 
-builder.Services.AddSingleton(kernelBuilder.Build());
-
 // Register agents
-builder.Services.AddSingleton<ITravelAgent, PoiAgent>();
 builder.Services.AddSingleton<ITravelAgent>(sp =>
-    new FlightAgent(
-        sp.GetRequiredService<IPromptLoader>(),
-        sp.GetRequiredService<Kernel>()));
-builder.Services.AddSingleton<ITravelAgent, HotelAgent>();
+    new PoiAgent(sp.GetRequiredService<IPromptLoader>(), projectClient, modelDeployment));
+
+builder.Services.AddSingleton<ITravelAgent>(sp =>
+    new FlightAgent(sp.GetRequiredService<IPromptLoader>(), projectClient, modelDeployment));
+
+builder.Services.AddSingleton<ITravelAgent>(sp =>
+    new HotelAgent(sp.GetRequiredService<IPromptLoader>(), projectClient, modelDeployment));
 
 // Register orchestrator
 builder.Services.AddSingleton<TravelOrchestrator>();

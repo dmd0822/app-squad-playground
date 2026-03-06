@@ -215,3 +215,121 @@ Both Host and API `Program.cs` now use same explicit factory lambda for `FlightA
 **Why:** Scaffold had nested `{ success, message, items[] }` wrapper per result type, but task spec from Dave replaced it with flat arrays. Frontend is now built to that spec; backend must match.
 
 **Action needed:** Arthur / Trillian — verify `TravelController` serializes to this shape. If API still returns nested wrappers, either update API or update frontend types.
+
+## 2026-03-06T15:26:52Z: User directive
+**By:** Dave Davis (via Copilot)
+**What:** Switch from Semantic Kernel to Azure Agent Framework. All agents must use Azure AI Foundry / Azure.AI.Projects SDK exclusively. Semantic Kernel is no longer the chosen framework for this project.
+**Status:** Accepted
+**Rationale:** User request — captured for team memory
+
+## 2026-03-06: Azure Agent Framework Migration
+**Author:** Arthur (Lead Architect)  
+**Date:** 2026-03-06  
+**Status:** Accepted (directed by Dave Davis)
+
+### Summary
+Standardize all three travel agents (POI, Flight, Hotel) on the Azure AI Foundry Agent Framework (`Azure.AI.Projects` SDK). Remove all Semantic Kernel (`Microsoft.SemanticKernel`) dependencies from the solution.
+
+### Context
+The project currently used a mixed framework approach:
+- **PoiAgent** and **FlightAgent**: Semantic Kernel 1.73.0 via `IChatCompletionService`
+- **HotelAgent**: Azure AI Foundry Agent Framework via `Azure.AI.Projects 2.0.0-beta.1`
+
+Dave Davis directed this migration to eliminate framework fragmentation and standardize on Azure AI Foundry.
+
+### Decision
+**Chosen SDK:** `Azure.AI.Projects 2.0.0-beta.1`
+
+**Pattern:** All agents use:
+- `PromptAgentDefinition` for agent registration with system prompt
+- `ProjectResponsesClient.CreateResponseAsync()` for invocation
+- Lazy thread-safe agent registration via `SemaphoreSlim`
+- Graceful fallback when `AIProjectClient` is not configured (for testing)
+
+**Authentication:** `DefaultAzureCredential` (no API keys)
+
+### Packages Removed
+- `Microsoft.SemanticKernel 1.73.0`
+- `Microsoft.SemanticKernel.Connectors.AzureOpenAI 1.73.0`
+
+### Packages Added
+- `Azure.AI.Projects 2.0.0-beta.1`
+- `Azure.Identity 1.17.1`
+
+### Environment Variables
+**New:**
+- `AZURE_AI_FOUNDRY_PROJECT_ENDPOINT`
+- `AZURE_AI_FOUNDRY_MODEL_DEPLOYMENT` (optional, default: `gpt-4o`)
+
+**Removed:**
+- `AzureOpenAI:Endpoint`
+- `AzureOpenAI:ApiKey`
+- `AzureOpenAI:DeploymentName`
+
+### Impact
+| Component | Change |
+|-----------|--------|
+| `PoiAgent.cs` | Migrated to Azure AI Foundry pattern |
+| `FlightAgent.cs` | Migrated to Azure AI Foundry pattern |
+| `HotelAgent.cs` | No change (reference implementation) |
+| `TravelAssistant.Host/Program.cs` | Replaced SK Kernel with AIProjectClient |
+| `TravelAssistant.Api/Program.cs` | Replaced SK Kernel with AIProjectClient |
+| `TravelAgentBase`, `ITravelAgent` | No change |
+| `TravelOrchestrator` | No change |
+
+### Build Verification
+✅ Full solution builds cleanly  
+✅ All 7 projects compile successfully  
+✅ 0 errors, 0 warnings  
+✅ All 9 unit tests passing
+
+### Rationale
+1. **Single framework:** Eliminates confusion about which SDK to use for new agents
+2. **Azure AI Foundry alignment:** Matches Dave's strategic direction for the project
+3. **No API keys:** `DefaultAzureCredential` provides secure, managed authentication
+4. **Agent registration:** Foundry's agent versioning provides audit trail and model governance
+
+### Assignee
+**Ford** (Backend Dev) — implementation (completed)  
+**Marvin** (QA) — test updates (completed)
+
+## 2026-03-06: DI Wiring Migration to Azure AI Foundry
+**Author:** Ford (Backend Dev)  
+**Date:** 2026-03-06  
+**Status:** Completed
+
+### Summary
+Updated dependency injection wiring in both `TravelAssistant.Host` and `TravelAssistant.Api` to remove Semantic Kernel and use Azure AI Foundry Agent Framework (`Azure.AI.Projects`) exclusively. All three agents (POI, Flight, Hotel) now follow the same constructor pattern and DI registration approach.
+
+### Changes Made
+
+**TravelAssistant.Host/Program.cs & TravelAssistant.Api/Program.cs:**
+- Removed all Semantic Kernel builder configuration
+- Added `AIProjectClient` registration with `DefaultAzureCredential` authentication
+- Configuration reads from `AZURE_AI_FOUNDRY_PROJECT_ENDPOINT` and `AZURE_AI_FOUNDRY_MODEL_DEPLOYMENT`
+- Graceful fallback when endpoint not configured (null `projectClient`)
+- Unified agent registrations: all three use factory lambda passing `projectClient` and `modelDeployment`
+
+**Package Changes (both Host and Api projects):**
+- Removed: `Microsoft.SemanticKernel 1.73.0`
+- Removed: `Microsoft.SemanticKernel.Connectors.AzureOpenAI 1.73.0`
+- Added: `Azure.AI.Projects 2.0.0-beta.1`
+- Added: `Azure.Identity 1.17.1`
+
+### Configuration Key Changes
+| Old (Semantic Kernel) | New (Azure AI Foundry) |
+|---|---|
+| `AzureOpenAI:Endpoint` | `AZURE_AI_FOUNDRY_PROJECT_ENDPOINT` |
+| `AzureOpenAI:ApiKey` | _(not used — DefaultAzureCredential)_ |
+| `AzureOpenAI:DeploymentName` | `AZURE_AI_FOUNDRY_MODEL_DEPLOYMENT` |
+
+### Implications
+1. **Environment setup required** — Both Host and API now require `AZURE_AI_FOUNDRY_PROJECT_ENDPOINT` to be configured for agents to function
+2. **Authentication model change** — Switched from API key to `DefaultAzureCredential`, supporting managed identity and other secure mechanisms
+3. **Agent constructor uniformity** — All three agents now have identical constructor signatures
+4. **No more mixed SDK pattern** — Project unified on Azure AI Foundry for all agents
+
+### Build Verification
+✅ `dotnet restore` — All packages restored successfully  
+✅ `dotnet build` — Build succeeded, 0 errors, 0 warnings  
+✅ All 7 projects compiled successfully

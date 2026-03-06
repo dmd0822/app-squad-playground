@@ -1,8 +1,11 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.SemanticKernel" Version="1.73.0" />
     <ProjectReference Include="..\TravelAssistant.Abstractions\TravelAssistant.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Azure.AI.Projects" Version="2.0.0-beta.1" />
   </ItemGroup>
 
   <PropertyGroup>
