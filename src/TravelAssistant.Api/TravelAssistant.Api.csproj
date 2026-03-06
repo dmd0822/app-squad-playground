@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.3" />
+    <PackageReference Include="Microsoft.SemanticKernel" Version="1.73.0" />
+    <PackageReference Include="Microsoft.SemanticKernel.Connectors.AzureOpenAI" Version="1.73.0" />
+    <PackageReference Include="YamlDotNet" Version="16.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\TravelAssistant.Abstractions\TravelAssistant.Abstractions.csproj" />
+    <ProjectReference Include="..\TravelAssistant.Agents.PointsOfInterest\TravelAssistant.Agents.PointsOfInterest.csproj" />
+    <ProjectReference Include="..\TravelAssistant.Agents.FlightSearch\TravelAssistant.Agents.FlightSearch.csproj" />
+    <ProjectReference Include="..\TravelAssistant.Agents.HotelSearch\TravelAssistant.Agents.HotelSearch.csproj" />
+    <ProjectReference Include="..\TravelAssistant.Host\TravelAssistant.Host.csproj" />
+  </ItemGroup>
+
+  <!-- Copy all prompt files to output directory -->
+  <ItemGroup>
+    <None Include="..\TravelAssistant.Agents.PointsOfInterest\Prompts\**\*.yaml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>Prompts\poi\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </None>
+    <None Include="..\TravelAssistant.Agents.FlightSearch\Prompts\**\*.yaml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>Prompts\flight\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </None>
+    <None Include="..\TravelAssistant.Agents.HotelSearch\Prompts\**\*.yaml">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <Link>Prompts\hotel\%(RecursiveDir)%(Filename)%(Extension)</Link>
+    </None>
+  </ItemGroup>
+
+</Project>

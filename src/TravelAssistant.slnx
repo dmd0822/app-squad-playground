@@ -1,0 +1,9 @@
+<Solution>
+  <Project Path="TravelAssistant.Abstractions/TravelAssistant.Abstractions.csproj" />
+  <Project Path="TravelAssistant.Agents.FlightSearch/TravelAssistant.Agents.FlightSearch.csproj" />
+  <Project Path="TravelAssistant.Agents.HotelSearch/TravelAssistant.Agents.HotelSearch.csproj" />
+  <Project Path="TravelAssistant.Agents.PointsOfInterest/TravelAssistant.Agents.PointsOfInterest.csproj" />
+  <Project Path="TravelAssistant.Api/TravelAssistant.Api.csproj" />
+  <Project Path="TravelAssistant.Host/TravelAssistant.Host.csproj" />
+  <Project Path="TravelAssistant.Tests/TravelAssistant.Tests.csproj" />
+</Solution>

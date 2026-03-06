@@ -1,0 +1,129 @@
+#root {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+  font-family: system-ui, sans-serif;
+  color: #222;
+}
+
+/* ── App shell ──────────────────────────────── */
+.app header {
+  text-align: center;
+  margin-bottom: 2rem;
+  border-bottom: 1px solid #e0e0e0;
+  padding-bottom: 1.5rem;
+}
+
+.app header h1 {
+  margin: 0 0 0.25rem;
+  font-size: 2rem;
+}
+
+.app header p {
+  margin: 0;
+  color: #666;
+}
+
+.app footer {
+  text-align: center;
+  margin-top: 3rem;
+  padding-top: 1rem;
+  border-top: 1px solid #e0e0e0;
+  color: #aaa;
+  font-size: 13px;
+}
+
+/* ── Search section ─────────────────────────── */
+.search-section {
+  background: #f8f9fa;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+/* ── Error section ──────────────────────────── */
+.error-section {
+  background: #fff3f3;
+  border: 1px solid #f5c6c6;
+  border-radius: 6px;
+  padding: 1rem 1.25rem;
+  margin-bottom: 1rem;
+  color: #c0392b;
+}
+
+/* ── Results section ────────────────────────── */
+.results-section h2 {
+  font-size: 1.4rem;
+  margin: 0 0 1rem;
+}
+
+.errors {
+  background: #fff8e1;
+  border: 1px solid #ffe082;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+  margin-bottom: 1rem;
+}
+
+.errors .error {
+  margin: 0;
+  font-size: 14px;
+  color: #7a5c00;
+}
+
+.results-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* ── Result panel (shared by all three) ─────── */
+.result-panel {
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  padding: 1.25rem;
+  background: #fff;
+}
+
+.result-panel h3 {
+  margin: 0 0 0.75rem;
+  font-size: 1.1rem;
+  border-bottom: 1px solid #eee;
+  padding-bottom: 0.5rem;
+}
+
+.result-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.result-card {
+  background: #fafafa;
+  border: 1px solid #eee;
+  border-radius: 6px;
+  padding: 0.75rem 1rem;
+}
+
+.empty-msg {
+  color: #999;
+  font-size: 14px;
+  margin: 0;
+}
+
+/* ── Badge / tag ────────────────────────────── */
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  border-radius: 999px;
+  background: #e8f0fe;
+  color: #1a6fdb;
+  letter-spacing: 0.03em;
+}

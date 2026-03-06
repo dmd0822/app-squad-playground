@@ -29,3 +29,44 @@ Test framework: xUnit. Integration tests tagged [Integration] to allow CI to ski
 **Prompt Convention:** YAML files at `{AgentProject}/Prompts/{promptName}.prompt.yaml`
 
 **Build Status:** Solution builds, all 9 tests passing. Ready for Ford to implement agent logic.
+
+### 2026-03-06: Three Agents Implemented + Testing Required
+
+**Agent Implementations Complete (Ford):**
+- **PoiAgent** — Semantic Kernel 1.73.0, JSON-based output, optional Kernel constructor
+- **FlightAgent** — SK pattern, metadata-based parameters (Origin/CabinClass), JSON fenced-block output
+- **HotelAgent** — Azure AI Foundry Agent Framework (mixed framework; standardization decision pending)
+
+**Web UI Added:** TravelAssistant.Api project + React frontend in /frontend. All components implemented.
+
+**Testing Scope for Marvin:**
+1. **Unit Tests** — All three agents need `ProcessAsync` tests
+   - PoiAgent: Mock `IChatCompletionService`, construct test `Kernel`, verify JSON parsing
+   - FlightAgent: Same pattern, verify Origin/CabinClass metadata reading
+   - HotelAgent: Mock `AIProjectClient`, verify response parsing
+
+2. **Integration Tests** — Tag with [Integration] for optional CI skip
+   - Live agent calls to Azure OpenAI (POI, Flight) and Azure AI Foundry (Hotel)
+   - Full TravelOrchestrator orchestration with all three agents
+   - Verify parallel fan-out behavior
+
+3. **API Controller Tests** — TravelController.Search endpoint
+   - Mock agents, verify endpoint returns flat response structure
+   - Test error handling and aggregation
+
+4. **Cross-Agent Contract Tests** — Verify DTOs serialize/deserialize correctly
+   - PoiSearchResult → PoiItem mapping
+   - FlightSearchResult → FlightItem mapping (flagged: airport code fields to-be-decided)
+   - HotelSearchResult → HotelItem mapping
+
+**Framework Notes for Tests:**
+- Both SK and Azure AI Foundry agents now in production — tests must cover both paths
+- Mixed framework approach approved short-term; standardization pending (see decisions.md)
+- Optional constructor pattern used in SK agents — tests should exercise both constructor paths
+
+**Test Infrastructure Needed:**
+- Azure OpenAI credentials for live integration tests (environment-based config)
+- Azure AI Foundry credentials for HotelAgent tests
+- Mock fixtures for unit testing all three agent patterns
+
+**Current Build Status:** Solution builds, all 9 initial tests passing. Tests cover only `CanHandle` logic. Agent logic tests (ProcessAsync) need to be written.
