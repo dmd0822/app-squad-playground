@@ -1,0 +1,9 @@
+{
+  "version": "1.0",
+  "universe_allowlist": ["hitchhikers-guide"],
+  "max_agents_before_overflow": 14,
+  "overflow_strategy": "diegetic_expansion",
+  "scribe_exempt": true,
+  "ralph_exempt": true,
+  "copilot_exempt": true
+}

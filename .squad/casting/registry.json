@@ -1,0 +1,53 @@
+{
+  "version": "1.0",
+  "agents": [
+    {
+      "persistent_name": "Arthur",
+      "role": "Lead / Architect",
+      "universe": "hitchhikers-guide",
+      "created_at": "2026-03-06T19:33:23Z",
+      "legacy_named": false,
+      "status": "active"
+    },
+    {
+      "persistent_name": "Ford",
+      "role": "Backend Dev",
+      "universe": "hitchhikers-guide",
+      "created_at": "2026-03-06T19:33:23Z",
+      "legacy_named": false,
+      "status": "active"
+    },
+    {
+      "persistent_name": "Trillian",
+      "role": "Azure Cloud Dev",
+      "universe": "hitchhikers-guide",
+      "created_at": "2026-03-06T19:33:23Z",
+      "legacy_named": false,
+      "status": "active"
+    },
+    {
+      "persistent_name": "Marvin",
+      "role": "Tester",
+      "universe": "hitchhikers-guide",
+      "created_at": "2026-03-06T19:33:23Z",
+      "legacy_named": false,
+      "status": "active"
+    },
+    {
+      "persistent_name": "Scribe",
+      "role": "Session Logger",
+      "universe": null,
+      "created_at": "2026-03-06T19:33:23Z",
+      "legacy_named": false,
+      "status": "active"
+    },
+    {
+      "persistent_name": "Ralph",
+      "role": "Work Monitor",
+      "universe": null,
+      "created_at": "2026-03-06T19:33:23Z",
+      "legacy_named": false,
+      "status": "active"
+    }
+  ]
+}
